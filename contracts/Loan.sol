@@ -1,6 +1,8 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.8.0;
 
+import {DAI} from './DAI.sol';
+
 /**
 asegurarse de que el colateral sea mayor al prestado
 asegurarse de que el lender gane algo de interes 
@@ -9,13 +11,15 @@ tener un aumento de interes por cada dia o semana o mes
 tener la oportunidad de pedir mas dinero prestado
 
 tener la oportunidad de pagar el dinero de apoquito
+
+fabric para desplegar un contrato con cada loan
  */
 
 contract Loan {
     //Data structure for the terms  of loan
     struct Terms {
         uint256 loanDaiAmount;
-        uint256 deeDaiAmount;
+        uint256 feeDaiAmount;
         uint256 ethCollateralAmount; /**Is expected to be more value 
         than the loan, so the lender doesnt loose any money
         */
@@ -42,10 +46,45 @@ contract Loan {
     address payable public borrower;
     address payable public lender;
     address public daiAddress;
+    uint256 public currentLoanDebt;
 
-    constructor(Terms memory _terms, address _daiAddress) {
-        terms = _terms;
-        daiAddress = _daiAddress;
+    // constructor(Terms memory _terms, address _daiAddress) {
+    //     terms = _terms;
+    //     daiAddress = _daiAddress;
+    //     lender = msg.sender;
+    //     state = LoanState.Created;
+    // }
+
+
+    /**
+    @notice initialize the loan. Follow this patter to allow clone factory patern (minimal proxy) 
+
+    REQUIREMENTS:
+        -current timestamp have to be menor compare to the loan duedate
+        - the collateralize must have more value than the loan. (this is achive via an oracle)
+    
+    */
+    function initializeLoan
+    (
+        uint256 _loanDaiAmount,
+        uint256 _feeDaiAmount,
+        uint256 _ethCollateralAmount,
+        uint256 _timestamp
+
+    ) public 
+    {
+        require(_timestamp > block.timestamp, 
+        "Your duedate have to be major than the current time"
+        );
+
+        terms = Terms(
+            {
+                loanDaiAmount: _loanDaiAmount,
+                feeDaiAmount: _feeDaiAmount,
+                ethCollateralAmount: _ethCollateralAmount,
+                timestamp: _timestamp
+            });
+
         lender = msg.sender;
         state = LoanState.Created;
     }
@@ -57,7 +96,7 @@ contract Loan {
     REQUIREMENTS:
     The lender needs to allows the contract to do this transfer
      */
-    function fundLoan() public onlyInState(LoanState.Created) {
+    function _fundLoan() private onlyInState(LoanState.Created) {
 
         state = LoanState.Funded;
         DAI(daiAddress).transferFrom(
@@ -65,7 +104,7 @@ contract Loan {
             address(this),
             terms.loanDaiAmount
         );
-
+        currentLoanDebt = terms.loanDaiAmount + terms.feeDaiAmount;
     }
     /**
     @notice takes the loans and accept the loans terms 
@@ -108,8 +147,11 @@ contract Loan {
             lender,
             terms.loanDaiAmount + terms.feeDaiAmount
         );
-        
+
+        if(currentLoanDebt == 0){
         selfdestruct(borrower);
+        }
+        
     }
 
     /**
@@ -133,8 +175,10 @@ contract Loan {
         require(block.timestamp >= terms.timestamp,
         "Cannot liquidate before the loan is due"
         );
+
+     selfdestruct(lender);
+
     }
 
-    selfdestruct(lender);
 
 }
